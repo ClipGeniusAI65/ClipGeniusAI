@@ -41,6 +41,8 @@ public class MainActivity extends Activity {
     private EditText transcriptInput;
     private Button analyzeButton;
     private TextView aiResults;
+    private EditText youtubeUrlInput;
+    private Button youtubeCheckButton;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
 
@@ -88,6 +90,25 @@ LinearLayout root = new LinearLayout(this);
         chooseParams.topMargin = dp(24);
         root.addView(choose, chooseParams);
         choose.setOnClickListener(v -> pickVideo());
+
+        TextView youtubeHeading = text("YouTube Video Link", 18, white);
+        LinearLayout.LayoutParams youtubeHeadingParams = new LinearLayout.LayoutParams(-1, -2);
+        youtubeHeadingParams.topMargin = dp(22);
+        root.addView(youtubeHeading, youtubeHeadingParams);
+
+        youtubeUrlInput = new EditText(this);
+        youtubeUrlInput.setHint("Paste YouTube video URL here...");
+        youtubeUrlInput.setSingleLine(true);
+        youtubeUrlInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        youtubeUrlInput.setTextColor(white);
+        youtubeUrlInput.setHintTextColor(muted);
+        root.addView(youtubeUrlInput, new LinearLayout.LayoutParams(-1, -2));
+
+        youtubeCheckButton = new Button(this);
+        youtubeCheckButton.setText("Check YouTube Link");
+        root.addView(youtubeCheckButton, new LinearLayout.LayoutParams(-1, dp(50)));
+        youtubeCheckButton.setOnClickListener(v -> checkYoutubeLink());
+
 
         videoView = new VideoView(this);
         videoView.setBackgroundColor(0xFF000000);
@@ -239,6 +260,34 @@ private void analyzeTranscript() {
         }
     }).start();
 }
+    private void checkYoutubeLink() {
+        String link = youtubeUrlInput.getText().toString().trim();
+
+        if (link.isEmpty()) {
+            youtubeUrlInput.setError("Please paste a YouTube link.");
+            return;
+        }
+
+        try {
+            Uri uri = Uri.parse(link);
+            String host = uri.getHost();
+
+            boolean valid = host != null &&
+                    (host.equalsIgnoreCase("youtu.be") ||
+                     host.equalsIgnoreCase("youtube.com") ||
+                     host.endsWith(".youtube.com"));
+
+            if (valid && (uri.getScheme().equalsIgnoreCase("https") ||
+                          uri.getScheme().equalsIgnoreCase("http"))) {
+                status.setText("YouTube link format is valid. Now import the authorized video file using Choose video.");
+            } else {
+                youtubeUrlInput.setError("Please enter a valid YouTube URL.");
+            }
+        } catch (Exception e) {
+            youtubeUrlInput.setError("Invalid YouTube URL.");
+        }
+    }
+
     private void pickVideo() {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
