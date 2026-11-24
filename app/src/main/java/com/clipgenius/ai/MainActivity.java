@@ -66,7 +66,9 @@ public class MainActivity extends Activity {
         int panel = 0xFF1D2030;
         int white = 0xFFF7F7FB;
         int muted = 0xFFB7B9C8;
-        LinearLayout root = new LinearLayout(this);
+        ScrollView scrollView = new ScrollView(this);
+scrollView.setFillViewport(true);
+LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(20), dp(28), dp(20), dp(20));
         root.setBackgroundColor(bg);
@@ -150,7 +152,8 @@ root.addView(aiResults, resultsParams);
         statusParams.topMargin = dp(18);
         root.addView(status, statusParams);
 
-        setContentView(root);
+        scrollView.addView(root);
+        setContentView(scrollView);
     }
 private void analyzeTranscript() {
     String transcript = transcriptInput.getText().toString().trim();
@@ -384,4 +387,3 @@ private void analyzeTranscript() {
         }
     }
 }
-;
