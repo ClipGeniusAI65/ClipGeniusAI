@@ -1,5 +1,14 @@
 package com.clipgenius.ai;
-
+import android.text.InputType;
+import org.json.JSONArray;
+import org.json.JSONObject;
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import android.app.Activity;
 import android.content.ContentValues;
 import android.content.Intent;
@@ -21,7 +30,6 @@ import java.io.FileDescriptor;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Locale;
-
 public class MainActivity extends Activity {
     private static final int PICK_VIDEO = 1001;
     private Uri selectedUri;
@@ -30,7 +38,11 @@ public class MainActivity extends Activity {
     private TextView status;
     private Spinner durationSpinner;
     private Button exportButton;
+    private EditText transcriptInput;
+    private Button analyzeButton;
+    private TextView aiResults;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -80,8 +92,34 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams videoParams = new LinearLayout.LayoutParams(-1, dp(210));
         videoParams.topMargin = dp(16);
         root.addView(videoView, videoParams);
+TextView aiHeading = text("✨ AI Clip Detection", 18, white);
+LinearLayout.LayoutParams aiHeadingParams = new LinearLayout.LayoutParams(-1, -2);
+aiHeadingParams.topMargin = dp(20);
+root.addView(aiHeading, aiHeadingParams);
 
-        TextView durationLabel = text("Clip duration", 16, white);
+transcriptInput = new EditText(this);
+transcriptInput.setHint("Paste your Hindi or English video transcript here...");
+transcriptInput.setTextColor(white);
+transcriptInput.setHintTextColor(muted);
+transcriptInput.setMinLines(4);
+transcriptInput.setGravity(Gravity.TOP);
+transcriptInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+LinearLayout.LayoutParams transcriptParams = new LinearLayout.LayoutParams(-1, -2);
+transcriptParams.topMargin = dp(10);
+root.addView(transcriptInput, transcriptParams);
+
+analyzeButton = new Button(this);
+analyzeButton.setText("Analyze with AI");
+LinearLayout.LayoutParams analyzeParams = new LinearLayout.LayoutParams(-1, dp(50));
+analyzeParams.topMargin = dp(10);
+root.addView(analyzeButton, analyzeParams);
+analyzeButton.setOnClickListener(v -> analyzeTranscript());
+
+aiResults = text("AI clip suggestions will appear here.", 14, muted);
+LinearLayout.LayoutParams resultsParams = new LinearLayout.LayoutParams(-1, -2);
+resultsParams.topMargin = dp(12);
+root.addView(aiResults, resultsParams);
+       TextView durationLabel = text("Clip duration", 16, white);
         LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(-1, -2);
         labelParams.topMargin = dp(22);
         root.addView(durationLabel, labelParams);
@@ -114,7 +152,90 @@ public class MainActivity extends Activity {
 
         setContentView(root);
     }
+private void analyzeTranscript() {
+    String transcript = transcriptInput.getText().toString().trim();
 
+    if (transcript.length() < 20) {
+        transcriptInput.setError("Please enter at least 20 characters.");
+        return;
+    }
+
+    analyzeButton.setEnabled(false);
+    aiResults.setText("AI is analyzing your transcript...");
+
+    new Thread(() -> {
+        HttpURLConnection conn = null;
+        try {
+            URL url = new URL("https://clipgenius-ai.nikhilm-82686.workers.dev/analyze");
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("POST");
+            conn.setConnectTimeout(20000);
+            conn.setReadTimeout(45000);
+            conn.setDoOutput(true);
+            conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+
+            JSONObject payload = new JSONObject();
+            payload.put("transcript", transcript);
+
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(payload.toString().getBytes(StandardCharsets.UTF_8));
+            }
+
+            int code = conn.getResponseCode();
+            InputStream stream = code >= 200 && code < 300
+                    ? conn.getInputStream() : conn.getErrorStream();
+
+            StringBuilder responseText = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    responseText.append(line);
+                }
+            }
+
+            if (code < 200 || code >= 300) {
+                throw new Exception("Server error: " + responseText);
+            }
+
+            JSONObject response = new JSONObject(responseText.toString());
+            if (!response.optBoolean("success", false)) {
+                throw new Exception(response.optString("error", "AI analysis failed"));
+            }
+
+            JSONArray clips = response.getJSONArray("clips");
+            StringBuilder result = new StringBuilder();
+
+            for (int i = 0; i < clips.length(); i++) {
+                JSONObject clip = clips.getJSONObject(i);
+                result.append("\nClip ").append(i + 1).append("\n");
+                result.append("Title: ").append(clip.optString("title")).append("\n");
+                result.append("Start: ").append(clip.optString("start_hint")).append("\n");
+                result.append("End: ").append(clip.optString("end_hint")).append("\n");
+                result.append("Reason: ").append(clip.optString("reason")).append("\n");
+                result.append("Score: ").append(clip.optInt("score")).append("/100\n");
+            }
+
+            String finalResult = result.length() == 0
+                    ? "No clip suggestions found." : result.toString();
+
+            mainHandler.post(() -> {
+                aiResults.setText(finalResult);
+                analyzeButton.setEnabled(true);
+                status.setText("AI analysis complete.");
+            });
+
+        } catch (Exception e) {
+            String error = "AI error: " + e.getMessage();
+            mainHandler.post(() -> {
+                aiResults.setText(error);
+                analyzeButton.setEnabled(true);
+            });
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }).start();
+}
     private void pickVideo() {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
@@ -263,3 +384,4 @@ public class MainActivity extends Activity {
         }
     }
 }
+;
