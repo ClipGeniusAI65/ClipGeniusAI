@@ -700,8 +700,17 @@ public class MainActivity extends Activity {
             }
 
             if (sampleCount == 0) {
+                int debugTrack = extractor.getSampleTrackIndex();
+                long debugTime = extractor.getSampleTime();
                 outputFile.delete();
-                return null;
+                throw new Exception(
+                        "No audio samples in chunk. Start=" + startUs
+                        + ", End=" + endUs
+                        + ", AudioTrack=" + audioTrack
+                        + ", CurrentTrack=" + debugTrack
+                        + ", SampleTime=" + debugTime
+                        + ", DurationMs=" + durationMs
+                );
             }
 
             muxer.stop();
