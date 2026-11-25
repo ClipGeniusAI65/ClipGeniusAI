@@ -31,3 +31,14 @@ Application ID: `com.clipgenius.ai`
 Version: `0.1.0`
 Minimum Android: 8.0 (API 26)
 Target SDK: 35
+
+
+## Version 0.2.1 update
+
+- Uses Whisper segment timestamps when available and offsets them by each 30-second audio chunk.
+- Stops transcription and reports an error if any audio chunk cannot be extracted instead of silently skipping it.
+- Sends timestamped transcript text to the Worker analysis endpoint.
+- Displays timestamped AI suggestions with individual export actions.
+- Exports the suggested time range instead of always exporting from the beginning.
+
+Important limitations: timestamp precision depends on Whisper segment data and source media keyframes. This version does not yet implement 9:16 re-encoding/cropping, burned-in subtitles, batch export, or arbitrary YouTube video downloading.

@@ -59,6 +59,8 @@ public class MainActivity extends Activity {
     private EditText youtubeUrlInput;
 
     private TextView aiResults;
+    private LinearLayout clipList;
+    private JSONArray suggestedClips = new JSONArray();
 
     private final Handler mainHandler =
             new Handler(Looper.getMainLooper());
@@ -221,7 +223,14 @@ public class MainActivity extends Activity {
 
         root.addView(aiResults, resultsParams);
 
-        TextView durationLabel = text("Clip duration", 16, white);
+        clipList = new LinearLayout(this);
+        clipList.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams clipListParams =
+                new LinearLayout.LayoutParams(-1, -2);
+        clipListParams.topMargin = dp(8);
+        root.addView(clipList, clipListParams);
+
+        TextView durationLabel = text("Manual clip duration", 16, white);
 
         LinearLayout.LayoutParams labelParams =
                 new LinearLayout.LayoutParams(-1, -2);
@@ -251,9 +260,8 @@ public class MainActivity extends Activity {
         root.addView(durationSpinner);
 
         TextView note = text(
-                "Current export creates an opening segment. "
-                        + "AI timestamps and captions are not yet applied "
-                        + "to exported clips.",
+                "AI suggestions with reliable timestamps can be exported below. "
+                        + "Manual export remains available as a fallback.",
                 13,
                 muted
         );
@@ -489,10 +497,7 @@ public class MainActivity extends Activity {
                             endUs
                     );
                     if (audioFile == null) {
-                        final String msg = "Part " + part + " extraction FAILED";
-                        mainHandler.post(() -> status.setText(msg));
-                        android.util.Log.e("ClipGeniusAI", msg);
-                        continue;
+                        throw new Exception("Audio extraction failed for part " + part + " of " + totalChunks + ". No transcript was produced for this part.");
                     } else {
                         final String msg = "Part " + part + " extracted: " + audioFile.length() + " bytes";
                         mainHandler.post(() -> status.setText(msg));
@@ -502,7 +507,7 @@ public class MainActivity extends Activity {
                     try {
 
                         String transcript =
-                                sendAudioToWorker(audioFile);
+                                sendAudioToWorker(audioFile, startUs);
 
                         if (!transcript.trim().isEmpty()) {
 
@@ -521,6 +526,9 @@ public class MainActivity extends Activity {
                 }
 
                 String finalText = fullTranscript.toString().trim();
+                if (finalText.isEmpty()) {
+                    throw new Exception("No speech was transcribed from any audio part.");
+                }
 
                 mainHandler.post(() -> {
 
@@ -735,7 +743,7 @@ public class MainActivity extends Activity {
     // SEND AUDIO TO CLOUDFLARE WORKER
     // =====================================
 
-    private String sendAudioToWorker(File audioFile)
+    private String sendAudioToWorker(File audioFile, long chunkStartUs)
             throws Exception {
 
         ByteArrayOutputStream byteStream =
@@ -844,7 +852,36 @@ public class MainActivity extends Activity {
                 );
             }
 
-            return response.optString("text", "");
+            String plainText = response.optString("text", "").trim();
+            JSONArray segments = response.optJSONArray("segments");
+            StringBuilder timestamped = new StringBuilder();
+
+            if (segments != null && segments.length() > 0) {
+                for (int i = 0; i < segments.length(); i++) {
+                    JSONObject segment = segments.optJSONObject(i);
+                    if (segment == null) continue;
+                    String segmentText = segment.optString("text", "").trim();
+                    if (segmentText.isEmpty()) continue;
+                    double relativeSeconds = segment.optDouble("start", 0.0);
+                    long absoluteSeconds = chunkStartUs / 1_000_000L
+                            + Math.max(0L, (long) relativeSeconds);
+                    timestamped.append("[")
+                            .append(formatTimestamp(absoluteSeconds))
+                            .append("] ")
+                            .append(segmentText)
+                            .append("\n");
+                }
+            }
+
+            if (timestamped.length() > 0) {
+                return timestamped.toString().trim();
+            }
+
+            if (!plainText.isEmpty()) {
+                return "[" + formatTimestamp(chunkStartUs / 1_000_000L)
+                        + "] " + plainText;
+            }
+            return "";
 
         } finally {
 
@@ -852,6 +889,16 @@ public class MainActivity extends Activity {
                 conn.disconnect();
             }
         }
+    }
+
+    private String formatTimestamp(long seconds) {
+        long hours = seconds / 3600;
+        long minutes = (seconds % 3600) / 60;
+        long secs = seconds % 60;
+        if (hours > 0) {
+            return String.format(Locale.US, "%02d:%02d:%02d", hours, minutes, secs);
+        }
+        return String.format(Locale.US, "%02d:%02d", minutes, secs);
     }
 
     // =====================================
@@ -890,8 +937,8 @@ public class MainActivity extends Activity {
                 conn = (HttpURLConnection) url.openConnection();
 
                 conn.setRequestMethod("POST");
-                conn.setConnectTimeout(20000);
-                conn.setReadTimeout(45000);
+                conn.setConnectTimeout(30000);
+                conn.setReadTimeout(180000);
                 conn.setDoOutput(true);
 
                 conn.setRequestProperty(
@@ -958,45 +1005,47 @@ public class MainActivity extends Activity {
                 }
 
                 JSONArray clips = response.getJSONArray("clips");
-
+                JSONArray validClips = new JSONArray();
                 StringBuilder result = new StringBuilder();
 
                 for (int i = 0; i < clips.length(); i++) {
-
-                    JSONObject clip = clips.getJSONObject(i);
-
-                    result.append("\nClip ")
-                            .append(i + 1)
-                            .append("\n");
-
-                    result.append("Title: ")
-                            .append(clip.optString("title"))
-                            .append("\n");
-
-                    result.append("Start: ")
-                            .append(clip.optString("start_hint"))
-                            .append("\n");
-
-                    result.append("End: ")
-                            .append(clip.optString("end_hint"))
-                            .append("\n");
-
-                    result.append("Reason: ")
-                            .append(clip.optString("reason"))
-                            .append("\n");
-
-                    result.append("Score: ")
-                            .append(clip.optInt("score"))
-                            .append("/100\n");
+                    JSONObject clip = clips.optJSONObject(i);
+                    if (clip == null) continue;
+                    double start = clip.optDouble("start_seconds", -1);
+                    double end = clip.optDouble("end_seconds", -1);
+                    if (start < 0 || end <= start) continue;
+                    validClips.put(clip);
+                    result.append("Clip ").append(validClips.length())
+                            .append(": ").append(clip.optString("title"))
+                            .append(" ( ").append(formatTimestamp((long) start))
+                            .append(" - ").append(formatTimestamp((long) end))
+                            .append(" )\n");
                 }
 
-                String finalResult = result.length() == 0
-                        ? "No clip suggestions found."
-                        : result.toString();
+                String finalResult = validClips.length() == 0
+                        ? "AI analysis finished, but no reliable timestamped clips were found. Check that Whisper returned timestamp segments."
+                        : "Found " + validClips.length() + " timestamped clip(s). Tap Export on a clip below.";
 
                 mainHandler.post(() -> {
-
+                    suggestedClips = validClips;
                     aiResults.setText(finalResult);
+                    clipList.removeAllViews();
+                    for (int i = 0; i < validClips.length(); i++) {
+                        JSONObject clip = validClips.optJSONObject(i);
+                        if (clip == null) continue;
+                        final int clipIndex = i;
+                        double start = clip.optDouble("start_seconds", 0);
+                        double end = clip.optDouble("end_seconds", 0);
+                        String title = clip.optString("title", "Suggested clip");
+                        String detail = title + " · " + formatTimestamp((long) start)
+                                + "–" + formatTimestamp((long) end)
+                                + " · Score " + clip.optInt("score") + "/100";
+                        Button exportSuggested = new Button(this);
+                        exportSuggested.setText("Export: " + detail);
+                        exportSuggested.setOnClickListener(v -> exportSuggestedClip(clipIndex));
+                        clipList.addView(exportSuggested,
+                                new LinearLayout.LayoutParams(-1, -2));
+                    }
                     analyzeButton.setEnabled(true);
                     status.setText("AI analysis complete.");
                 });
@@ -1024,6 +1073,37 @@ public class MainActivity extends Activity {
     // =====================================
     // VIDEO EXPORT
     // =====================================
+
+    private void exportSuggestedClip(int index) {
+        if (selectedUri == null || index < 0 || index >= suggestedClips.length()) return;
+        JSONObject clip = suggestedClips.optJSONObject(index);
+        if (clip == null) return;
+        double startSeconds = clip.optDouble("start_seconds", -1);
+        double endSeconds = clip.optDouble("end_seconds", -1);
+        if (startSeconds < 0 || endSeconds <= startSeconds) {
+            status.setText("This suggestion has no valid timestamps.");
+            return;
+        }
+        long startUs = (long) (startSeconds * 1_000_000L);
+        long endUs = Math.min(durationMs * 1000L,
+                (long) (endSeconds * 1_000_000L));
+        if (endUs <= startUs) {
+            status.setText("Suggested clip range is outside this video.");
+            return;
+        }
+        status.setText("Exporting suggested clip...");
+        new Thread(() -> {
+            String message;
+            try {
+                exportVideoSegment(startUs, endUs);
+                message = "Saved suggested clip to Movies/ClipGeniusAI";
+            } catch (Exception e) {
+                message = "Export failed: " + e.getMessage();
+            }
+            final String finalMessage = message;
+            mainHandler.post(() -> status.setText(finalMessage));
+        }).start();
+    }
 
     private void exportClip() {
 
@@ -1059,7 +1139,7 @@ public class MainActivity extends Activity {
 
             try {
 
-                exportFirstSegment(endUs);
+                exportVideoSegment(0, endUs);
 
                 result = "Saved to Movies/ClipGeniusAI";
 
@@ -1080,10 +1160,10 @@ public class MainActivity extends Activity {
     }
 
     // =====================================
-    // EXPORT FIRST VIDEO SEGMENT
+    // EXPORT A VIDEO SEGMENT
     // =====================================
 
-    private void exportFirstSegment(long endUs)
+    private void exportVideoSegment(long startUs, long endUs)
             throws Exception {
 
         MediaExtractor extractor = new MediaExtractor();
@@ -1196,9 +1276,16 @@ public class MainActivity extends Activity {
                 );
 
                 trackMap[sourceTrack] = out;
-
                 extractor.selectTrack(sourceTrack);
             }
+
+            if (startUs > 0) {
+                extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC);
+            }
+            long firstSampleTimeUs = extractor.getSampleTime();
+            long actualStartUs = firstSampleTimeUs >= 0
+                    ? firstSampleTimeUs
+                    : startUs;
 
             muxer.start();
 
@@ -1222,6 +1309,10 @@ public class MainActivity extends Activity {
                 if (time < 0 || time >= endUs) {
                     break;
                 }
+                if (time < actualStartUs) {
+                    if (!extractor.advance()) break;
+                    continue;
+                }
 
                 buffer.clear();
 
@@ -1233,7 +1324,7 @@ public class MainActivity extends Activity {
 
                 info.offset = 0;
                 info.size = size;
-                info.presentationTimeUs = time;
+                info.presentationTimeUs = time - actualStartUs;
                 info.flags = extractor.getSampleFlags();
 
                 muxer.writeSampleData(
