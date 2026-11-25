@@ -489,7 +489,14 @@ public class MainActivity extends Activity {
                             endUs
                     );
                     if (audioFile == null) {
+                        final String msg = "Part " + part + " extraction FAILED";
+                        mainHandler.post(() -> status.setText(msg));
+                        android.util.Log.e("ClipGeniusAI", msg);
                         continue;
+                    } else {
+                        final String msg = "Part " + part + " extracted: " + audioFile.length() + " bytes";
+                        mainHandler.post(() -> status.setText(msg));
+                        android.util.Log.d("ClipGeniusAI", msg);
                     }
 
                     try {
