@@ -488,6 +488,9 @@ public class MainActivity extends Activity {
                             startUs,
                             endUs
                     );
+                    if (audioFile == null) {
+                        continue;
+                    }
 
                     try {
 
@@ -680,9 +683,8 @@ public class MainActivity extends Activity {
             }
 
             if (sampleCount == 0) {
-                throw new Exception(
-                        "No audio samples found in this part."
-                );
+                outputFile.delete();
+                return null;
             }
 
             muxer.stop();
