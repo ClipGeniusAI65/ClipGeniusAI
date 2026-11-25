@@ -636,10 +636,12 @@ public class MainActivity extends Activity {
 
             extractor.selectTrack(audioTrack);
 
-            extractor.seekTo(
-                    startUs,
-                    MediaExtractor.SEEK_TO_PREVIOUS_SYNC
-            );
+            if (startUs > 0) {
+                extractor.seekTo(
+                        startUs,
+                        MediaExtractor.SEEK_TO_PREVIOUS_SYNC
+                );
+            }
 
             ByteBuffer buffer = ByteBuffer.allocate(
                     4 * 1024 * 1024
